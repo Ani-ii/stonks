@@ -22,6 +22,7 @@ import (
 
 	"stonks/analyzer"
 	"stonks/announce"
+	"stonks/attach"
 	"stonks/filter"
 	"stonks/match"
 	"stonks/store"
@@ -33,6 +34,7 @@ func main() {
 	scan := flag.Int("scan", 300, "how many of the newest filings to classify")
 	provider := flag.String("provider", "mock", "mock or gemini")
 	model := flag.String("model", "gemini-3.5-flash-lite", "Gemini model id (pin an exact id, not a -latest alias)")
+	usePDF := flag.Bool("pdf", false, "also download each filing's PDF and give its text to the model (needs pdftotext)")
 	flag.Parse()
 
 	var an analyzer.Analyzer
@@ -109,9 +111,27 @@ func main() {
 	}
 	fmt.Printf("\nRunning %d through %s\n\n", len(picked), an.Name())
 
+	var att *attach.Fetcher
+	if *usePDF {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			cache = os.TempDir()
+		}
+		att = attach.New(cache + "/stonks-attach")
+	}
 	var inTok, outTok int
 	for _, a := range picked {
-		sig, err := an.Analyze(ctx, analyzer.Input{Filing: a})
+		in := analyzer.Input{Filing: a}
+		note := ""
+		if att != nil {
+			if txt, err := att.Text(ctx, a); err != nil {
+				note = " [no PDF text: " + err.Error() + "]"
+			} else {
+				in.Text = txt
+				note = fmt.Sprintf(" [PDF text: %d chars]", len(txt))
+			}
+		}
+		sig, err := an.Analyze(ctx, in)
 		var rl *analyzer.ErrRateLimited
 		if errors.As(err, &rl) {
 			fmt.Printf("RATE LIMITED (retry after %v); stopping\n", rl.RetryAfter)
@@ -127,8 +147,8 @@ func main() {
 		if len(head) > 80 {
 			head = head[:80] + "..."
 		}
-		fmt.Printf("[%s] %s | %s | %s\n    -> %s (confidence %.2f, materiality %s): %s\n",
-			a.Source, a.Company, strings.TrimSpace(a.Category+" / "+a.Subcategory), head,
+		fmt.Printf("[%s] %s | %s | %s%s\n    -> %s (confidence %.2f, materiality %s): %s\n",
+			a.Source, a.Company, strings.TrimSpace(a.Category+" / "+a.Subcategory), head, note,
 			strings.ToUpper(sig.Direction), sig.Confidence, sig.Materiality, sig.Reason)
 	}
 	fmt.Printf("\nTokens used: %d in, %d out\n", inTok, outTok)

@@ -49,9 +49,12 @@ var analyze = []string{
 	"preferential", "rights issue", "credit rating",
 }
 
+// seen in live data and clearly material:
+var analyzeMore = []string{"commencement of commercial production", "issue of securities"}
+
 var skip = []string{
 	"analyst / investor meet", "analysts/institutional investor meet", "newspaper publication",
-	"trading window", "certificate under reg", "postal ballot", "egm", "agm",
+	"trading window", "certificate under", "monitoring agency report", "amendments to memorandum", "shareholders meeting", "postal ballot", "egm", "agm",
 	"esop", "esps", "statement of deviation", "insider trading", "board meeting intimation",
 }
 
@@ -77,7 +80,7 @@ func Classify(a announce.Announcement) Result {
 			return Result{Skip, p}
 		}
 	}
-	for _, p := range analyze {
+	for _, p := range append(append([]string{}, analyze...), analyzeMore...) {
 		if strings.Contains(text, p) {
 			return Result{Analyze, p}
 		}

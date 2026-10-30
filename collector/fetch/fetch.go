@@ -48,6 +48,10 @@ func newHTTP(http11Only bool) *http.Client {
 	return &http.Client{Jar: jar, Timeout: 8 * time.Second, Transport: tr}
 }
 
+// NewHTTPClient exposes the hardened client builder (HTTP/1.1 only when http11Only) for other packages,
+// for example the attachment downloader.
+func NewHTTPClient(http11Only bool) *http.Client { return newHTTP(http11Only) }
+
 func New() *Client {
 	return &Client{
 		HTTP:    newHTTP(false),
