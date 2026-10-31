@@ -42,3 +42,20 @@ func TestSameEvent(t *testing.T) {
 		t.Error("different company must not match")
 	}
 }
+
+func TestSameAttachment(t *testing.T) {
+	a := announce.Announcement{Source: "BSE", AttachmentName: "abc.pdf"}
+	if !SameAttachment(a, announce.Announcement{Source: "BSE", AttachmentName: "abc.pdf"}) {
+		t.Error("same file name should match")
+	}
+	if SameAttachment(a, announce.Announcement{Source: "BSE", AttachmentName: "other.pdf"}) {
+		t.Error("different files must not match")
+	}
+	if SameAttachment(announce.Announcement{}, announce.Announcement{}) {
+		t.Error("two filings without attachments must not match")
+	}
+	u := announce.Announcement{AttachmentURL: "https://nsearchives.nseindia.com/corporate/x.pdf"}
+	if !SameAttachment(u, u) {
+		t.Error("same URL should match")
+	}
+}

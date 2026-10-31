@@ -64,6 +64,13 @@ func (f *Fetcher) cachePath(url string) string {
 	return filepath.Join(f.CacheDir, hex.EncodeToString(sum[:])+".txt")
 }
 
+// TextHash identifies a document by its content, so the same PDF uploaded twice under different file names
+// (BSE names every upload with a fresh UUID) is recognised as one document.
+func TextHash(text string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	return hex.EncodeToString(sum[:8])
+}
+
 // Text returns the extracted attachment text, from the cache when possible.
 func (f *Fetcher) Text(ctx context.Context, a announce.Announcement) (string, error) {
 	url := f.URL(a)

@@ -40,3 +40,17 @@ func SameEvent(a, b announce.Announcement, window time.Duration) bool {
 	}
 	return d <= window && NormalizeCompany(a.Company) == NormalizeCompany(b.Company)
 }
+
+// SameAttachment reports whether two filings point at the same attached document (same URL, or same BSE file
+// name). Results and "outcome of board meeting" filings often share one PDF; analysing it twice gave
+// inconsistent answers in the live run.
+func SameAttachment(a, b announce.Announcement) bool {
+	key := func(x announce.Announcement) string {
+		if x.AttachmentURL != "" {
+			return x.AttachmentURL
+		}
+		return x.AttachmentName
+	}
+	ka, kb := key(a), key(b)
+	return ka != "" && ka == kb
+}

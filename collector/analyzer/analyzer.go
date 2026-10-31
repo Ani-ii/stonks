@@ -6,6 +6,7 @@ package analyzer
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"stonks/announce"
@@ -47,8 +48,32 @@ Rules:
 - Keep the reason to one or two sentences.
 Answer only with the requested JSON.`
 
-// DefaultMaxChars limits attachment text sent to the model.
-const DefaultMaxChars = 12000
+// DefaultMaxChars limits attachment text sent to the model (after Compact). The first live PDF run showed
+// 12,000 characters cut off the net-profit figures of a long results filing.
+const DefaultMaxChars = 40000
+
+var spaceRun = regexp.MustCompile(`[ \t]{3,}`)
+
+// Compact removes the padding that `pdftotext -layout` adds to keep table columns aligned (runs of spaces,
+// page-break characters, repeated blank lines) so that more real content fits in the character limit.
+func Compact(s string) string {
+	s = strings.NewReplacer("\r", "", "\f", "\n").Replace(s)
+	var out []string
+	blank := 0
+	for _, l := range strings.Split(s, "\n") {
+		l = spaceRun.ReplaceAllString(strings.TrimRight(l, " \t"), "  ")
+		if strings.TrimSpace(l) == "" {
+			blank++
+			if blank > 1 {
+				continue
+			}
+		} else {
+			blank = 0
+		}
+		out = append(out, l)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
 
 // BuildPrompt formats the filing for the model. Times are shown in IST, as the exchanges publish them.
 func BuildPrompt(in Input, maxChars int) string {
@@ -76,7 +101,7 @@ func BuildPrompt(in Input, maxChars int) string {
 	if f.Subject != "" {
 		fmt.Fprintf(&b, "Subject: %s\n", f.Subject)
 	}
-	if t := strings.TrimSpace(in.Text); t != "" {
+	if t := Compact(in.Text); t != "" {
 		if len(t) > maxChars {
 			t = t[:maxChars] + "\n[text truncated]"
 		}

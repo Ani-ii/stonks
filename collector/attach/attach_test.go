@@ -96,3 +96,12 @@ func TestNotPDFAndHTTPErrorAndNoText(t *testing.T) {
 		t.Errorf("big: want ErrTooLarge, got %v", err)
 	}
 }
+
+func TestTextHash(t *testing.T) {
+	if TextHash("same text\n") != TextHash("  same text") {
+		t.Error("surrounding whitespace must not change the hash")
+	}
+	if TextHash("one") == TextHash("two") {
+		t.Error("different texts must hash differently")
+	}
+}

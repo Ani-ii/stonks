@@ -79,15 +79,16 @@ func main() {
 	}
 	// Pick up to n ANALYZE filings. BSE first (its headlines are more informative), and skip a filing that is
 	// the same event as one already picked from the other exchange (analyse once, not twice).
+	pool := *n * 4 // candidates considered, because some will turn out to be the same document
 	var picked []announce.Announcement
 	for _, src := range []string{"BSE", "NSE"} {
 		for _, a := range rows {
-			if a.Source != src || len(picked) >= *n || filter.Classify(a).Decision != filter.Analyze {
+			if a.Source != src || len(picked) >= pool || filter.Classify(a).Decision != filter.Analyze {
 				continue
 			}
 			dup := false
 			for _, p := range picked {
-				if match.SameEvent(p, a, 15*time.Minute) {
+				if match.SameEvent(p, a, 15*time.Minute) || match.SameAttachment(p, a) {
 					dup = true
 					break
 				}
@@ -109,7 +110,7 @@ func main() {
 			fmt.Printf("  %3d  %s\n", kv.n, kv.k)
 		}
 	}
-	fmt.Printf("\nRunning %d through %s\n\n", len(picked), an.Name())
+	fmt.Printf("\nRunning up to %d through %s (%d candidates)\n\n", *n, an.Name(), len(picked))
 
 	var att *attach.Fetcher
 	if *usePDF {
@@ -119,8 +120,12 @@ func main() {
 		}
 		att = attach.New(cache + "/stonks-attach")
 	}
-	var inTok, outTok int
+	var inTok, outTok, done int
+	seenText := map[string]string{} // text hash -> first filing that had it
 	for _, a := range picked {
+		if done >= *n {
+			break
+		}
 		in := analyzer.Input{Filing: a}
 		note := ""
 		if att != nil {
@@ -129,6 +134,13 @@ func main() {
 			} else {
 				in.Text = txt
 				note = fmt.Sprintf(" [PDF text: %d chars]", len(txt))
+				// The same PDF can be uploaded twice under different file names (results + board outcome).
+				h := attach.TextHash(txt)
+				if prev, ok := seenText[h]; ok {
+					fmt.Printf("[%s] %s | %s: skipped, same document text as %q\n", a.Source, a.Company, a.Subcategory, prev)
+					continue
+				}
+				seenText[h] = a.Company + " / " + a.Subcategory
 			}
 		}
 		sig, err := an.Analyze(ctx, in)
@@ -143,6 +155,7 @@ func main() {
 		}
 		inTok += sig.InputTokens
 		outTok += sig.OutputTokens
+		done++
 		head := a.Headline
 		if len(head) > 80 {
 			head = head[:80] + "..."
