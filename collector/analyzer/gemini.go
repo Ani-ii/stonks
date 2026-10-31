@@ -21,6 +21,13 @@ func (e *ErrRateLimited) Error() string {
 	return fmt.Sprintf("rate limited (retry after %v)", e.RetryAfter)
 }
 
+// ErrTransient marks failures worth retrying later (network trouble, HTTP 5xx). Anything else, such as a
+// malformed answer or a 4xx, is permanent for that filing.
+type ErrTransient struct{ Err error }
+
+func (e *ErrTransient) Error() string { return "transient: " + e.Err.Error() }
+func (e *ErrTransient) Unwrap() error { return e.Err }
+
 // Gemini calls the Gemini Developer API (generateContent) with a JSON response schema.
 // The API key goes in a header, never in the URL, so it cannot end up in logs.
 type Gemini struct {
@@ -101,7 +108,10 @@ func (g *Gemini) Analyze(ctx context.Context, in Input) (Signal, error) {
 	req.Header.Set("x-goog-api-key", g.APIKey)
 	resp, err := g.HTTP.Do(req)
 	if err != nil {
-		return Signal{}, err
+		if ctx.Err() != nil {
+			return Signal{}, ctx.Err()
+		}
+		return Signal{}, &ErrTransient{err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -117,7 +127,11 @@ func (g *Gemini) Analyze(ctx context.Context, in Input) (Signal, error) {
 		if len(s) > 200 {
 			s = s[:200]
 		}
-		return Signal{}, fmt.Errorf("gemini http %d: %s", resp.StatusCode, s)
+		err := fmt.Errorf("gemini http %d: %s", resp.StatusCode, s)
+		if resp.StatusCode >= 500 {
+			return Signal{}, &ErrTransient{err}
+		}
+		return Signal{}, err
 	}
 	return parseGemini(body, g.Name())
 }

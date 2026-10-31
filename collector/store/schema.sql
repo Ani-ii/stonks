@@ -25,3 +25,29 @@ CREATE TABLE IF NOT EXISTS announcements (
 CREATE INDEX IF NOT EXISTS idx_ann_time    ON announcements (disseminated_ms);
 CREATE INDEX IF NOT EXISTS idx_ann_symbol  ON announcements (symbol, disseminated_ms);
 CREATE INDEX IF NOT EXISTS idx_ann_event   ON announcements (event_id);
+
+-- M3: what the filter decided about every filing, and the model's signals (D-008, D-055, D-064).
+CREATE TABLE IF NOT EXISTS triage (
+  announcement_id INTEGER PRIMARY KEY REFERENCES announcements(id),
+  decision        TEXT NOT NULL,            -- ANALYZE | REVIEW | SKIP | DUPLICATE | ERROR
+  reason          TEXT NOT NULL,
+  updated_ms      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS signals (
+  id              INTEGER PRIMARY KEY,
+  announcement_id INTEGER NOT NULL REFERENCES announcements(id),
+  model           TEXT NOT NULL,            -- e.g. gemini:gemini-3.5-flash-lite (never mix models in a scorecard)
+  direction       TEXT NOT NULL,            -- up | down | neutral
+  confidence      REAL NOT NULL,
+  materiality     TEXT NOT NULL,            -- high | medium | low
+  reason          TEXT NOT NULL,
+  text_hash       TEXT NOT NULL DEFAULT '', -- hash of the attachment text analysed ('' = metadata only)
+  text_chars      INTEGER NOT NULL DEFAULT 0,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  created_ms      INTEGER NOT NULL,         -- signal_time (D-009)
+  notified_ms     INTEGER,                  -- when the Telegram message was sent
+  UNIQUE (announcement_id, model)
+);
+CREATE INDEX IF NOT EXISTS idx_signals_created ON signals (created_ms);
+CREATE INDEX IF NOT EXISTS idx_signals_hash    ON signals (text_hash);

@@ -117,3 +117,27 @@ func TestGeminiMinInterval(t *testing.T) {
 		t.Fatalf("3 calls took %v, want at least 160ms of spacing", d)
 	}
 }
+
+func TestGeminiServerErrorsAndDroppedConnectionsAreTransient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	_, err := newTestGemini(srv.URL).Analyze(context.Background(), sampleInput())
+	srv.Close()
+	var tr *ErrTransient
+	if !errors.As(err, &tr) {
+		t.Fatalf("503 should be transient, got %v", err)
+	}
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	defer srv.Close()
+	if _, err := newTestGemini(srv.URL).Analyze(context.Background(), sampleInput()); !errors.As(err, &tr) {
+		t.Fatalf("dropped connection should be transient, got %v", err)
+	}
+	// A 403 or a bad answer is permanent.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(403) }))
+	defer srv2.Close()
+	if _, err := newTestGemini(srv2.URL).Analyze(context.Background(), sampleInput()); errors.As(err, &tr) {
+		t.Fatalf("403 must not be transient: %v", err)
+	}
+}
