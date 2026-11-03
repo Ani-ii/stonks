@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS signals (
   text_chars      INTEGER NOT NULL DEFAULT 0,
   input_tokens    INTEGER NOT NULL DEFAULT 0,
   output_tokens   INTEGER NOT NULL DEFAULT 0,
+  flags TEXT NOT NULL DEFAULT '',
+  model_direction TEXT NOT NULL DEFAULT '',
+  extraction_json TEXT,              -- when the Telegram message was sent
   created_ms      INTEGER NOT NULL,         -- signal_time (D-009)
   notified_ms     INTEGER,                  -- when the Telegram message was sent
   UNIQUE (announcement_id, model)

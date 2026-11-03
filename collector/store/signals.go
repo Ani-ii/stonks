@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -121,12 +122,24 @@ func (s *SQLite) RecentSignals(ctx context.Context, sinceMs int64) ([]SignalRef,
 }
 
 // SaveSignal stores a signal and returns its id (0 if this announcement already has one from this model).
+// D-076: flags, the model's original direction and the extracted figures are stored beside the signal,
+// so the scorecard can filter on them. Needs the flags, model_direction and extraction_json columns.
 func (s *SQLite) SaveSignal(ctx context.Context, rec SignalRecord) (int64, error) {
+	var extraction any // NULL for filings that are not results
+	if rec.Sig.Extraction != nil {
+		b, err := json.Marshal(rec.Sig.Extraction)
+		if err != nil {
+			return 0, err
+		}
+		extraction = string(b)
+	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO signals
- (announcement_id, model, direction, confidence, materiality, reason, text_hash, text_chars, input_tokens, output_tokens, created_ms)
- VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(announcement_id, model) DO NOTHING`,
+ (announcement_id, model, direction, confidence, materiality, reason, text_hash, text_chars, input_tokens, output_tokens, created_ms,
+  flags, model_direction, extraction_json)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(announcement_id, model) DO NOTHING`,
 		rec.AnnouncementID, rec.Sig.Model, rec.Sig.Direction, rec.Sig.Confidence, rec.Sig.Materiality, strings.TrimSpace(rec.Sig.Reason),
-		rec.TextHash, rec.TextChars, rec.Sig.InputTokens, rec.Sig.OutputTokens, rec.Created.UnixMilli())
+		rec.TextHash, rec.TextChars, rec.Sig.InputTokens, rec.Sig.OutputTokens, rec.Created.UnixMilli(),
+		rec.Sig.Flags, rec.Sig.ModelDirection, extraction)
 	if err != nil {
 		return 0, err
 	}

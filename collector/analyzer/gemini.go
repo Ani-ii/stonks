@@ -32,8 +32,8 @@ func (e *ErrTransient) Unwrap() error { return e.Err }
 // The API key goes in a header, never in the URL, so it cannot end up in logs.
 type Gemini struct {
 	APIKey      string
-	Model       string        // pin an exact model id, not a "-latest" alias, so results stay comparable
-	BaseURL     string        // default https://generativelanguage.googleapis.com
+	Model       string // pin an exact model id, not a "-latest" alias, so results stay comparable
+	BaseURL     string // default https://generativelanguage.googleapis.com
 	HTTP        *http.Client
 	MinInterval time.Duration // minimum gap between requests (the free tier allows roughly 15 per minute)
 	MaxChars    int
@@ -68,6 +68,16 @@ func (g *Gemini) wait(ctx context.Context) error {
 	return nil
 }
 
+// figuresSchema is one line item over three periods; every figure may be null.
+var figuresSchema = map[string]any{
+	"type": "OBJECT",
+	"properties": map[string]any{
+		"current":         map[string]any{"type": "NUMBER", "nullable": true},
+		"previous_period": map[string]any{"type": "NUMBER", "nullable": true},
+		"year_ago":        map[string]any{"type": "NUMBER", "nullable": true},
+	},
+}
+
 var responseSchema = map[string]any{
 	"type": "OBJECT",
 	"properties": map[string]any{
@@ -75,8 +85,24 @@ var responseSchema = map[string]any{
 		"confidence":  map[string]any{"type": "NUMBER"},
 		"materiality": map[string]any{"type": "STRING", "enum": []string{"high", "medium", "low"}},
 		"reason":      map[string]any{"type": "STRING"},
+		// extraction is always present; is_results says whether the filing is a results statement (D-076, D-077).
+		"extraction": map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"is_results":          map[string]any{"type": "BOOLEAN"},
+				"period_end":          map[string]any{"type": "STRING"},
+				"period_type":         map[string]any{"type": "STRING", "enum": []string{"quarter", "half_year", "year"}},
+				"basis":               map[string]any{"type": "STRING", "enum": []string{"consolidated", "standalone"}},
+				"unit":                map[string]any{"type": "STRING"},
+				"revenue":             figuresSchema,
+				"net_profit":          figuresSchema,
+				"ebitda":              figuresSchema,
+				"net_profit_row_text": map[string]any{"type": "STRING"},
+			},
+			"required": []string{"is_results"},
+		},
 	},
-	"required": []string{"direction", "confidence", "materiality", "reason"},
+	"required": []string{"direction", "confidence", "materiality", "reason", "extraction"},
 }
 
 func (g *Gemini) Analyze(ctx context.Context, in Input) (Signal, error) {
@@ -93,7 +119,7 @@ func (g *Gemini) Analyze(ctx context.Context, in Input) (Signal, error) {
 			"temperature":      0,
 			"responseMimeType": "application/json",
 			"responseSchema":   responseSchema,
-			"maxOutputTokens":  1024,
+			"maxOutputTokens":  2048,
 		},
 	})
 	if err != nil {
@@ -133,9 +159,16 @@ func (g *Gemini) Analyze(ctx context.Context, in Input) (Signal, error) {
 		}
 		return Signal{}, err
 	}
-	return parseGemini(body, g.Name())
+	sig, err := parseGemini(body, g.Name())
+	if err != nil {
+		return Signal{}, err
+	}
+	// D-076: for results filings the direction comes from the extracted figures, checked against the text.
+	return Resolve(sig, in), nil
 }
 
+// parseGemini keeps its original signature; the optional extraction is attached to the returned Signal and
+// applied later by Resolve (which needs the filing text and publication time).
 func parseGemini(body []byte, model string) (Signal, error) {
 	var r struct {
 		Candidates []struct {
@@ -166,10 +199,11 @@ func parseGemini(body []byte, model string) (Signal, error) {
 		}
 	}
 	var raw struct {
-		Direction   string  `json:"direction"`
-		Confidence  float64 `json:"confidence"`
-		Materiality string  `json:"materiality"`
-		Reason      string  `json:"reason"`
+		Direction   string      `json:"direction"`
+		Confidence  float64     `json:"confidence"`
+		Materiality string      `json:"materiality"`
+		Reason      string      `json:"reason"`
+		Extraction  *Extraction `json:"extraction"`
 	}
 	if err := json.Unmarshal([]byte(text.String()), &raw); err != nil {
 		return Signal{}, fmt.Errorf("gemini: answer is not the requested JSON (finish=%s): %w", r.Candidates[0].FinishReason, err)
@@ -177,5 +211,6 @@ func parseGemini(body []byte, model string) (Signal, error) {
 	return Validate(Signal{
 		Direction: raw.Direction, Confidence: raw.Confidence, Materiality: raw.Materiality, Reason: raw.Reason,
 		Model: model, InputTokens: r.Usage.Prompt, OutputTokens: r.Usage.Candidates + r.Usage.Thoughts,
+		Extraction: raw.Extraction,
 	})
 }

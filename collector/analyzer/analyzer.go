@@ -21,14 +21,22 @@ type Input struct {
 
 // Signal is the model's structured answer. Model records which model produced it, so results from
 // different models are never mixed up in the scorecard.
+//
+// D-076 additions (all zero for non-results filings): Extraction holds the figures copied from a results
+// table; ModelDirection is what the model said when code overrode it; Flags is a comma-separated list of
+// what the consistency checks found (stale_period, figure_not_in_text, model_disagrees, ...). Flags is a
+// string, not a slice, so Signal stays comparable with ==.
 type Signal struct {
-	Direction    string  // "up", "down" or "neutral"
-	Confidence   float64 // 0..1
-	Materiality  string  // "high", "medium" or "low"
-	Reason       string  // one or two sentences
-	Model        string
-	InputTokens  int
-	OutputTokens int
+	Direction      string  // "up", "down" or "neutral"
+	Confidence     float64 // 0..1
+	Materiality    string  // "high", "medium" or "low"
+	Reason         string  // one or two sentences
+	Model          string
+	InputTokens    int
+	OutputTokens   int
+	Extraction     *Extraction
+	ModelDirection string
+	Flags          string
 }
 
 type Analyzer interface {
@@ -46,6 +54,8 @@ Rules:
 - If the text does not contain what is needed to judge (for example, results announced without numbers), answer "neutral" with low confidence and say what is missing in the reason.
 - Routine or procedural filings are "neutral" with materiality "low".
 - Keep the reason to one or two sentences.
+- Always include "extraction". If the filing is a financial results statement, set is_results true and copy the figures EXACTLY as printed in the table, in the table's own unit, for the headline statement (consolidated if both consolidated and standalone are given; say which in basis). Do not compute, convert or round anything. Read the column headings and use them to pick the right column: tables usually run current quarter, previous quarter, same quarter last year, then year-to-date, then full year. Revenue is total revenue from operations (or total income if that is all there is); net_profit is profit after tax for the period. For half-year or annual statements use the current period for "current" and the same period last year for "year_ago", and leave "previous_period" null. Use null for any figure that is not printed. net_profit_row_text is the table row you used for net profit, copied as printed. period_end is the end date of the current period as YYYY-MM-DD.
+- For any filing that is not a results statement, return extraction with is_results false and nothing else.
 Answer only with the requested JSON.`
 
 // DefaultMaxChars limits attachment text sent to the model (after Compact). The first live PDF run showed

@@ -73,8 +73,8 @@ type Runner struct {
 	S    Store
 	A    analyzer.Analyzer
 	Text func(ctx context.Context, a announce.Announcement) (string, error) // nil = metadata only
-	Link func(a announce.Announcement) string                              // attachment link for alerts, may be nil
-	N    Notifier                                                          // nil = no alerts
+	Link func(a announce.Announcement) string                               // attachment link for alerts, may be nil
+	N    Notifier                                                           // nil = no alerts
 	Cfg  Config
 	Now  func() time.Time
 	Log  *log.Logger
@@ -160,7 +160,14 @@ func (r *Runner) process(ctx context.Context, row store.Row) (stop bool, pause t
 		r.capLogged = false
 	}
 
-	recent, err := r.S.RecentSignals(ctx, now.Add(-cfg.DocWindow).UnixMilli())
+	// The duplicate window is measured back from the filing's own publication time, not from now. Measured
+	// from now, a runner catching up on old filings (after downtime) looked past the signals of the same
+	// event and analysed one document several times. A missing or future publication time falls back to now.
+	pub := row.A.DisseminatedAt
+	if pub.IsZero() || pub.After(now) {
+		pub = now
+	}
+	recent, err := r.S.RecentSignals(ctx, pub.Add(-cfg.DocWindow).UnixMilli())
 	if err != nil {
 		r.Log.Printf("ERROR reading recent signals: %v", err)
 		return true, 30 * time.Second
